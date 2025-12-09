@@ -1,42 +1,59 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'JDK17'
-        maven 'Maven-3.9'
-    }
-
     stages {
 
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/lamisbenhassine/lamis.benhassine4SAE10.git'
+                echo 'Clonage du dépôt Git...'
+                git branch: 'main',
+                    url: 'https://github.com/lamisbenhassine/lamis.benhassine4SAE10.git'
+            }
+        }
+
+        stage('Fix permissions') {
+            steps {
+                echo 'Correction des permissions pour mvnw...'
+                sh 'chmod +x mvnw'
             }
         }
 
         stage('Clean') {
             steps {
-                sh 'mvn clean'
+                echo 'Nettoyage du projet...'
+                sh './mvnw clean'
             }
         }
 
         stage('Compile') {
             steps {
-                sh 'mvn compile'
+                echo 'Compilation du projet...'
+                sh './mvnw compile'
             }
         }
 
         stage('Test') {
             steps {
-                sh 'mvn test'
+                echo 'Exécution des tests...'
+                sh './mvnw test'
             }
         }
 
         stage('Package') {
             steps {
-                sh 'mvn package -DskipTests'
-                archiveArtifacts artifacts: 'target/*.jar'
+                echo 'Génération du fichier JAR...'
+                sh './mvnw package -DskipTests'
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
             }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline CI exécuté avec succès'
+        }
+        failure {
+            echo '❌ Échec du pipeline CI'
         }
     }
 }
