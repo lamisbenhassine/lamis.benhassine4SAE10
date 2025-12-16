@@ -145,27 +145,15 @@ pipeline {
         }
 
         stage('☸️ Deploy to Kubernetes') {
-            steps {
-                echo '☸️ Déploiement Kubernetes (mysql + app + service)...'
-                sh '''
-                    set -e
-
-                    # Appliquer MySQL (secret + deploy + service)
-                    kubectl apply -f k8s/mysql.yaml
-
-                    # Appliquer l'app + service
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
-
-                    # Redémarrage "propre" pour forcer la nouvelle image si nécessaire
-                    kubectl rollout restart deployment tpfoyer-deployment || true
-
-                    echo "=== Status ==="
-                    kubectl get pods -o wide
-                    kubectl get svc
-                '''
-            }
-        }
+    steps {
+        sh '''
+          cd lamis.benhassine4SAE10
+          kubectl apply -f k8s/mysql.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+        '''
+    }
+}
 
         stage('✅ Verify & Report') {
             steps {
