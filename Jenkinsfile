@@ -119,16 +119,20 @@ pipeline {
             }
         }
 
+        
         stage('🔐 Docker Login') {
-            steps {
-                echo '🔐 Login Docker Hub...'
-                withCredentials([string(credentialsId: 'dockerhub-token', variable: 'DOCKER_TOKEN')]) {
-                    sh '''
-                        echo "$DOCKER_TOKEN" | docker login -u lamisbenhassine --password-stdin
-                    '''
-                }
-            }
-        }
+  steps {
+    withCredentials([usernamePassword(
+      credentialsId: 'dockerhub-token',
+      usernameVariable: 'DOCKER_USER',
+      passwordVariable: 'DOCKER_TOKEN'
+    )]) {
+      sh '''
+        echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+      '''
+    }
+  }
+}
 
         stage('📤 Push Docker Image') {
             steps {
