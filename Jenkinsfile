@@ -145,12 +145,11 @@ pipeline {
         }
 
         stage('☸️ Deploy to Kubernetes') {
-    steps {
+   steps {
+        echo '☸️ Déploiement sur Kubernetes...'
         sh '''
-          cd lamis.benhassine4SAE10
-          kubectl apply -f k8s/mysql.yaml
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
+            kubectl apply -f k8s/
+            kubectl rollout status deployment/tpfoyer-deployment
         '''
     }
 }
