@@ -7,12 +7,16 @@ pipeline {
         SONAR_PROJECT_KEY   = 'TP-Projet-2025-isra50'
         SONAR_PROJECT_NAME  = 'TP Projet 2025 - Spring Boot'
 
-        // Java
+        // Java (optionnel si déjà OK sur Jenkins)
         JAVA_HOME = '/usr/lib/jvm/java-17-openjdk-amd64'
         PATH = "${JAVA_HOME}/bin:${PATH}"
 
-        // Email (destination)
-        TO_EMAIL = 'lamisbenhassine6@gmail.com'   // <-- change ici
+        // Docker
+        DOCKER_IMAGE = 'lamisbenhassine/tpfoyer'
+        DOCKER_TAG   = '1.0'   // tu peux aussi mettre "${BUILD_NUMBER}" si tu veux versionner par build
+
+        // Email destination
+        TO_EMAIL = 'lamisbenhassine6@gmail.com'
     }
 
     stages {
@@ -33,21 +37,25 @@ pipeline {
 
         stage('🔧 Setup Environment') {
             steps {
-                echo '🔧 Configuration de l’environnement de build...'
+                echo '🔧 Vérifications Java / Docker / kubectl / Sonar...'
                 sh '''
-                    echo "=== Vérification Java ==="
+                    set -e
+
+                    echo "=== Java ==="
                     java -version
 
-                    echo "=== Vérification Maven ==="
-                    if command -v mvn >/dev/null 2>&1; then
-                        echo "✅ Maven est installé"
-                        mvn -version
-                    else
-                        echo "❌ Maven non trouvé"
-                        exit 1
-                    fi
+                    echo "=== Maven Wrapper ==="
+                    chmod +x mvnw
+                    ./mvnw -v
 
-                    echo "=== Vérification SonarQube ==="
+                    echo "=== Docker ==="
+                    docker --version
+                    docker info >/dev/null 2>&1 || (echo "❌ Docker daemon inaccessible (droits docker.sock)" && exit 1)
+
+                    echo "=== kubectl ==="
+                    kubectl version --client
+
+                    echo "=== SonarQube ==="
                     curl -s --connect-timeout 5 "${SONAR_HOST_URL}/api/system/status" \
                       | grep -q "UP" && echo "✅ SonarQube accessible" || echo "⚠️ SonarQube non accessible"
                 '''
@@ -56,8 +64,8 @@ pipeline {
 
         stage('🧹🔨 Clean & Compile Project') {
             steps {
-                echo '🧹🔨 Nettoyage et compilation du projet...'
-                sh 'mvn clean compile -q'
+                echo '🧹🔨 Nettoyage et compilation...'
+                sh './mvnw clean compile -q'
             }
         }
 
@@ -68,7 +76,7 @@ pipeline {
                     try {
                         withCredentials([string(credentialsId: 'jenkins-sonar', variable: 'SONAR_TOKEN')]) {
                             sh """
-                                mvn sonar:sonar \
+                                ./mvnw sonar:sonar \
                                   -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                                   -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
                                   -Dsonar.host.url=${SONAR_HOST_URL} \
@@ -88,9 +96,10 @@ pipeline {
 
         stage('📦 Build & Package') {
             steps {
-                echo '📦 Construction du fichier JAR...'
+                echo '📦 Construction du JAR...'
                 sh '''
-                    mvn package -DskipTests -q
+                    set -e
+                    ./mvnw package -DskipTests -q
 
                     echo "=== JAR généré ==="
                     ls -lh target/*.jar || (echo "❌ Aucun JAR généré" && exit 1)
@@ -99,15 +108,70 @@ pipeline {
             }
         }
 
+        stage('🐳 Build Docker Image') {
+            steps {
+                echo '🐳 Build de l’image Docker...'
+                sh '''
+                    set -e
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                    docker images | head -n 15
+                '''
+            }
+        }
+
+        stage('🔐 Docker Login') {
+            steps {
+                echo '🔐 Login Docker Hub...'
+                withCredentials([string(credentialsId: 'dockerhub-token', variable: 'DOCKER_TOKEN')]) {
+                    sh '''
+                        echo "$DOCKER_TOKEN" | docker login -u lamisbenhassine --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('📤 Push Docker Image') {
+            steps {
+                echo '📤 Push vers Docker Hub...'
+                sh '''
+                    set -e
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                '''
+            }
+        }
+
+        stage('☸️ Deploy to Kubernetes') {
+            steps {
+                echo '☸️ Déploiement Kubernetes (mysql + app + service)...'
+                sh '''
+                    set -e
+
+                    # Appliquer MySQL (secret + deploy + service)
+                    kubectl apply -f k8s/mysql.yaml
+
+                    # Appliquer l'app + service
+                    kubectl apply -f k8s/deployment.yaml
+                    kubectl apply -f k8s/service.yaml
+
+                    # Redémarrage "propre" pour forcer la nouvelle image si nécessaire
+                    kubectl rollout restart deployment tpfoyer-deployment || true
+
+                    echo "=== Status ==="
+                    kubectl get pods -o wide
+                    kubectl get svc
+                '''
+            }
+        }
+
         stage('✅ Verify & Report') {
             steps {
-                echo '✅ Vérification finale et rapport...'
+                echo '✅ Rapport final...'
                 sh '''
                     echo "=== RAPPORT FINAL ==="
                     echo "📦 Projet : ${SONAR_PROJECT_NAME}"
                     echo "🔑 Clé Sonar : ${SONAR_PROJECT_KEY}"
-                    echo "🌐 SonarQube : ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
-                    echo "📁 Artefact : target/*.jar"
+                    echo "🌐 Sonar : ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
+                    echo "🐳 Image : ${DOCKER_IMAGE}:${DOCKER_TAG}"
                     echo "✅ Build #${BUILD_NUMBER} terminé"
                 '''
             }
@@ -125,18 +189,19 @@ Bonjour,
 
 Le pipeline Jenkins est terminé.
 
-- Job      : ${env.JOB_NAME}
-- Build    : #${env.BUILD_NUMBER}
-- Statut   : ${status}
-- Console  : ${env.BUILD_URL}console
-- Artefacts: ${env.BUILD_URL}artifact/
-- Sonar    : ${env.SONAR_HOST_URL}/dashboard?id=${env.SONAR_PROJECT_KEY}
+- Job       : ${env.JOB_NAME}
+- Build     : #${env.BUILD_NUMBER}
+- Statut    : ${status}
+- Console   : ${env.BUILD_URL}console
+- Artefacts : ${env.BUILD_URL}artifact/
+- Sonar     : ${env.SONAR_HOST_URL}/dashboard?id=${env.SONAR_PROJECT_KEY}
+- Docker    : ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+- K8s       : kubectl get pods / svc (voir console)
 
 Cordialement,
 Jenkins
 """
 
-                // Envoi mail (Email Extension Plugin)
                 emailext(
                     to: "${env.TO_EMAIL}",
                     subject: subject,
