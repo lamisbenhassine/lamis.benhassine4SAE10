@@ -143,16 +143,19 @@ pipeline {
                 '''
             }
         }
-
+        
         stage('☸️ Deploy to Kubernetes') {
-   steps {
-        echo '☸️ Déploiement sur Kubernetes...'
-        sh '''
-            kubectl apply -f k8s/
-            kubectl rollout status deployment/tpfoyer-deployment
-        '''
+    steps {
+        withCredentials([file(credentialsId: 'kubeconfig-jenkins', variable: 'KUBECONFIG')]) {
+            sh '''
+              export KUBECONFIG=$KUBECONFIG
+              kubectl config get-contexts
+              kubectl apply -f k8s/
+            '''
+        }
     }
 }
+
 
         stage('✅ Verify & Report') {
             steps {
