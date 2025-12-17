@@ -144,88 +144,94 @@ pipeline {
             }
         }
         
-        stage('☸️ Deploy to Kubernetes') {
-  steps {
-    withCredentials([string(credentialsId: 'k8s-token', variable: 'K8S_TOKEN')]) {
-      sh '''
-        kubectl config set-cluster minikube \
-          --server=https://$(minikube ip):8443 \
-          --insecure-skip-tls-verify=true
-
-        kubectl config set-credentials jenkins \
-          --token=$K8S_TOKEN
-
-        kubectl config set-context jenkins-context \
-          --cluster=minikube \
-          --user=jenkins
-
-        kubectl config use-context jenkins-context
-
-        kubectl apply -f k8s/
-      '''
-    }
-  }
-}
-
-
-
-        stage('✅ Verify & Report') {
+        stage('📤 Push Docker Image') {
             steps {
-                echo '✅ Rapport final...'
+                echo '📤 Push vers Docker Hub...'
                 sh '''
-                    echo "=== RAPPORT FINAL ==="
-                    echo "📦 Projet : ${SONAR_PROJECT_NAME}"
-                    echo "🔑 Clé Sonar : ${SONAR_PROJECT_KEY}"
-                    echo "🌐 Sonar : ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
-                    echo "🐳 Image : ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    echo "✅ Build #${BUILD_NUMBER} terminé"
+                    set -e
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                '''
+            }
+        }
+
+        stage('☸️ Deploy to Kubernetes (Minikube)') {
+            steps {
+                echo '☸️ Déploiement Kubernetes...'
+                sh '''
+                    set -e
+
+                    echo "🔧 Vérification du contexte Kubernetes"
+                    kubectl config use-context minikube
+
+                    echo "🚀 Déploiement des manifests"
+                    kubectl apply -f k8s/
+
+                    echo "⏳ Attente du déploiement"
+                    kubectl rollout status deployment/tpfoyer-deployment --timeout=120s
+
+                    echo "📡 Services disponibles"
+                    kubectl get svc
+                '''
+            }
+        }
+
+        stage('✅ Verify Deployment') {
+            steps {
+                echo '✅ Vérification du service exposé...'
+                sh '''
+                    echo "🌐 URL Minikube :"
+                    minikube service tpfoyer-service --url || true
                 '''
             }
         }
     }
 
     post {
-        always {
-            script {
-                def status = currentBuild.currentResult
-                def subject = "[Jenkins] ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${status}"
-
-                def body = """
+        success {
+            echo '🎉 PIPELINE RÉUSSI 🎉'
+            emailext(
+                to: "${TO_EMAIL}",
+                subject: "[Jenkins] SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
 Bonjour,
 
-Le pipeline Jenkins est terminé.
+Le pipeline Jenkins a été exécuté avec succès ✅
 
-- Job       : ${env.JOB_NAME}
-- Build     : #${env.BUILD_NUMBER}
-- Statut    : ${status}
-- Console   : ${env.BUILD_URL}console
-- Artefacts : ${env.BUILD_URL}artifact/
-- Sonar     : ${env.SONAR_HOST_URL}/dashboard?id=${env.SONAR_PROJECT_KEY}
-- Docker    : ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
-- K8s       : kubectl get pods / svc (voir console)
+- Job        : ${JOB_NAME}
+- Build      : #${BUILD_NUMBER}
+- Image      : ${DOCKER_IMAGE}:${DOCKER_TAG}
+- Kubernetes : Déployé sur Minikube
+- Console    : ${BUILD_URL}console
 
 Cordialement,
 Jenkins
 """
-
-                emailext(
-                    to: "${env.TO_EMAIL}",
-                    subject: subject,
-                    body: body
-                )
-            }
-
-            echo '📊 PIPELINE TERMINÉ'
-            echo "⏱️ Durée : ${currentBuild.durationString}"
-            echo "📈 Statut : ${currentBuild.currentResult}"
-        }
-
-        success {
-            echo '🎉 PIPELINE RÉUSSI 🎉'
+            )
         }
 
         failure {
             echo '❌ PIPELINE ÉCHOUÉ'
+            emailext(
+                to: "${TO_EMAIL}",
+                subject: "[Jenkins] FAILURE - ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+Bonjour,
+
+❌ Le pipeline Jenkins a échoué.
+
+- Job     : ${JOB_NAME}
+- Build   : #${BUILD_NUMBER}
+- Console : ${BUILD_URL}console
+
+Merci de vérifier les logs.
+
+Jenkins
+"""
+            )
+        }
+
+        always {
+            echo "📊 Statut final : ${currentBuild.currentResult}"
         }
     }
 }
