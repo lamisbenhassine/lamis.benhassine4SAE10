@@ -94,13 +94,15 @@ pipeline {
         }
 
         stage('☸️ Deploy to Kubernetes') {
-            steps {
-                sh '''
-                    kubectl apply -f k8s/
-                    kubectl rollout status deployment tpfoyer-deployment
-                '''
-            }
-        }
+  steps {
+    sh """
+      kubectl apply -f k8s/
+      kubectl set image deployment/tpfoyer-deployment tpfoyer=${DOCKER_IMAGE}:${DOCKER_TAG}
+      kubectl rollout status deployment tpfoyer-deployment
+    """
+  }
+}
+
 
         stage('✅ Verify Deployment') {
             steps {
