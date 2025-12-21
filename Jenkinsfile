@@ -17,7 +17,7 @@ pipeline {
 
     stages {
 
-        stage('📥 Checkout Code') {
+        stage('Checkout Code') {
             steps {
                 checkout([
                     $class: 'GitSCM',
@@ -30,7 +30,7 @@ pipeline {
             }
         }
 
-        stage('🔧 Setup Environment') {
+        stage('Setup Environment') {
             steps {
                 sh '''
                     java -version
@@ -42,13 +42,13 @@ pipeline {
             }
         }
 
-        stage('🧹 Clean & Compile') {
+        stage('Clean & Compile') {
             steps {
                 sh './mvnw clean compile -DskipTests'
             }
         }
 
-        stage('🔍 SonarQube Analysis') {
+        stage('SonarQube Analysis') {
             steps {
                 withCredentials([string(credentialsId: 'jenkins-sonar', variable: 'SONAR_TOKEN')]) {
                     sh """
@@ -62,53 +62,58 @@ pipeline {
             }
         }
 
-        stage('📦 Build JAR') {
+        stage('Build JAR') {
             steps {
                 sh './mvnw package -DskipTests'
                 archiveArtifacts artifacts: 'target/*.jar'
             }
         }
 
-        stage('🐳 Build Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
             }
         }
 
-        stage('🔐 Docker Login') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-token',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_TOKEN'
-                )]) {
-                    sh 'echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin'
-                }
-            }
-        }
-
-        stage('📤 Push Docker Image') {
+        stage('Push Docker Image') {
             steps {
                 sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
             }
         }
 
-        stage('☸️ Deploy to Kubernetes') {
-  steps {
-    sh """
-      kubectl apply -f k8s/
-      kubectl set image deployment/tpfoyer-deployment tpfoyer=${DOCKER_IMAGE}:${DOCKER_TAG}
-      kubectl rollout status deployment tpfoyer-deployment
-    """
-  }
-}
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh """
+                  kubectl apply -f k8s/
+                  kubectl set image deployment/tpfoyer-deployment tpfoyer=${DOCKER_IMAGE}:${DOCKER_TAG}
+                  kubectl rollout status deployment tpfoyer-deployment
+                """
+            }
+        }
 
-
-        stage('✅ Verify Deployment') {
+        stage('Verify Deployment') {
             steps {
                 sh '''
                     kubectl get pods
                     kubectl get svc
+                '''
+            }
+        }
+
+        stage('Prometheus Check') {
+            steps {
+                sh '''
+                    echo "Checking Prometheus availability"
+                    curl -f http://localhost:9090/-/ready
+                '''
+            }
+        }
+
+        stage('Grafana Check') {
+            steps {
+                sh '''
+                    echo "Checking Grafana availability"
+                    curl -f http://localhost:3000/api/health
                 '''
             }
         }
@@ -118,19 +123,21 @@ pipeline {
         success {
             emailext(
                 to: "${TO_EMAIL}",
-                subject: "✅ Jenkins SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}",
+                subject: "Jenkins SUCCESS - ${JOB_NAME} #${BUILD_NUMBER}",
                 body: """
-Pipeline réussi 🎉
+Pipeline executed successfully
 
-Docker Image : ${DOCKER_IMAGE}:${DOCKER_TAG}
-Sonar : ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}
-Jenkins : ${BUILD_URL}
+Docker Image: ${DOCKER_IMAGE}:${DOCKER_TAG}
+SonarQube: ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}
+Jenkins: ${BUILD_URL}
+Prometheus: http://localhost:9090
+Grafana: http://localhost:3000
 """
             )
         }
 
         failure {
-            echo '❌ PIPELINE ÉCHOUÉ'
+            echo 'PIPELINE FAILED'
         }
     }
 }
